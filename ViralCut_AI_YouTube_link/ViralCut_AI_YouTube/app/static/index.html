@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ViralCut AI</title>
+<style>
+:root{font-family:Inter,Arial,sans-serif;color:#f7f7fb;background:#0b0b12}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#27124b 0,transparent 35%),#0b0b12;min-height:100vh}
+main{max-width:900px;margin:auto;padding:38px 20px}.brand{font-size:13px;letter-spacing:3px;color:#b9a1ff;font-weight:800}
+h1{font-size:clamp(34px,7vw,58px);margin:12px 0 8px}h1 span{color:#b18cff}
+.sub{color:#aaa9b8;line-height:1.6}.panel{background:#151520;border:1px solid #302b40;border-radius:20px;padding:24px;margin-top:25px;box-shadow:0 18px 60px #0006}
+label{display:block;font-weight:700;margin-bottom:10px}input{width:100%;padding:16px;border-radius:12px;border:1px solid #49435b;background:#0d0d15;color:white;font-size:15px}
+button{border:0;border-radius:12px;padding:15px 20px;font-weight:800;background:linear-gradient(90deg,#8d4cff,#d04bff);color:white;cursor:pointer;margin-top:14px;width:100%;font-size:15px}
+button:disabled{opacity:.5;cursor:wait}.hint,.status{color:#aaa9b8;font-size:13px;margin-top:12px;line-height:1.5}
+.clip{border:1px solid #343044;border-radius:14px;padding:15px;margin-top:12px;background:#101019}.cliptop{display:flex;justify-content:space-between;gap:10px;align-items:center}.score{color:#c9a7ff;font-weight:800}.clip p{color:#b9b7c5;font-size:14px;line-height:1.5}.clips{margin-top:18px}.export{background:#242033}.error{color:#ff7979}.legal{font-size:12px;color:#888697;margin-top:18px}
+</style></head>
+<body><main>
+<div class="brand">VIRALCUT / AI</div><h1>Encontre seus <span>melhores cortes.</span></h1>
+<p class="sub">Cole um link do YouTube, analise o conteúdo e escolha os trechos antes de exportar em formato vertical.</p>
+<section class="panel">
+<label for="url">Link do vídeo do YouTube</label>
+<input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="url">
+<button id="analyze">ANALISAR VÍDEO</button>
+<div id="status" class="status">Use somente vídeos seus ou para os quais você tenha autorização de uso e processamento.</div>
+<div id="clips" class="clips"></div>
+</section>
+<p class="legal">A pontuação é uma estimativa baseada no texto transcrito, não uma garantia de viralização. O enquadramento vertical usa corte central e pode precisar de ajuste.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);let jobId=null,poll=null;
+function status(t,err=false){$('status').textContent=t;$('status').className='status'+(err?' error':'')}
+$('analyze').onclick=async()=>{
+ const url=$('url').value.trim();if(!url){status('Cole o link do YouTube.',true);return}
+ $('analyze').disabled=true;$('clips').innerHTML='';status('Enviando link para análise...');
+ try{
+  const r=await fetch('/api/analyze-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||'Não foi possível iniciar.');
+  jobId=d.job_id;status('Análise iniciada. O tempo depende da duração do vídeo e do servidor.');
+  poll=setInterval(check,3000);
+ }catch(e){$('analyze').disabled=false;status(e.message,true)}
+};
+async function check(){
+ try{const r=await fetch('/api/jobs/'+jobId);const d=await r.json();status(d.message||d.status,d.status==='error');
+ if(d.status==='error'){clearInterval(poll);$('analyze').disabled=false}
+ if(d.status==='ready'){clearInterval(poll);$('analyze').disabled=false;render(d.clips)}
+ }catch(e){clearInterval(poll);$('analyze').disabled=false;status('Falha ao consultar a análise.',true)}
+}
+function render(clips){
+ if(!clips.length){$('clips').innerHTML='<p>Nenhum trecho sugerido. Tente um vídeo com fala mais clara.</p>';return}
+ $('clips').innerHTML='<h3>Revise e selecione os cortes</h3>'+clips.map(c=>`<label class="clip"><div class="cliptop"><span><input type="checkbox" value="${c.id}" checked style="width:auto"> Corte ${c.id} · ${fmt(c.start)}–${fmt(c.end)}</span><span class="score">${c.score}/99</span></div><p>${esc(c.text)}</p></label>`).join('')+'<button class="export" id="export">EXPORTAR CORTES SELECIONADOS</button>';
+ $('export').onclick=exportClips;
+}
+function fmt(s){return new Date(s*1000).toISOString().substring(14,19)}
+function esc(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function exportClips(){
+ const ids=[...$('clips').querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);
+ if(!ids.length){status('Selecione pelo menos um corte.',true);return}
+ $('export').disabled=true;status('Gerando os vídeos...');
+ try{const r=await fetch(`/api/jobs/${jobId}/export`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selected_ids:ids})});const d=await r.json();if(!r.ok)throw Error(d.detail||'Erro ao exportar');
+ status('Cortes prontos! Baixe o arquivo ZIP abaixo.');
+ const a=document.createElement('a');a.href=d.download_url;a.textContent='Baixar cortes em ZIP';a.style='display:block;color:#d1adff;margin-top:14px;font-weight:bold';$('clips').appendChild(a);
+ }catch(e){status(e.message,true)}finally{$('export').disabled=false}
+}
+</script></body></html>
